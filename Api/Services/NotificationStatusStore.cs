@@ -1,53 +1,105 @@
-﻿using System.Collections.Concurrent;
+﻿using System.Text.Json;
+using Microsoft.EntityFrameworkCore;
 using Shared.Contracts;
-using Shared.DTOs;
+using Api.Data;
+using Api.Data.Entities;
 
 namespace Api.Services;
 
-/// <summary>
-/// Временное хранилище статусов уведомлений (in-memory)
-/// TODO: Для продакшена заменить на реализацию с БД (EF Core + Outbox)
-/// </summary>
-public interface INotificationStatusStore
+public class EfNotificationStatusStore(AppDbContext dbContext) : INotificationStatusStore
 {
-    void Create(Guid correlationId, DateTime requestedAt);
-    void UpdateStatus(Guid correlationId, NotificationStatus status, string? error = null);
-    NotificationStatusResponse? GetStatus(Guid correlationId);
-}
-
-public class InMemoryNotificationStatusStore : INotificationStatusStore
-{
-    // ConcurrentDictionary — потоко-безопасный, подходит для демо
-    // TODO: В продакшене: использовать распределённое кэширование (Redis) или БД
-    private readonly ConcurrentDictionary<Guid, NotificationStatusResponse> _store = new();
-
-    public void Create(Guid correlationId, DateTime requestedAt)
+    public async Task CreateAsync(Guid correlationId, EmailRequested request,
+        CancellationToken cancellationToken = default)
     {
-        _store.TryAdd(correlationId, new NotificationStatusResponse(
-            CorrelationId: correlationId,
-            Status: NotificationStatus.Queued,
-            CreatedAt: requestedAt,
-            UpdatedAt: requestedAt
-        ));
-    }
+        // проверка идемпотентность
+        var existingStatus = await dbContext.NotificationStatuses
+            .AsNoTracking()
+            .FirstOrDefaultAsync(s => s.CorrelationId == correlationId, cancellationToken);
 
-    public void UpdateStatus(Guid correlationId, NotificationStatus status, string? error = null)
-    {
-        if (_store.TryGetValue(correlationId, out var existing))
+        if (existingStatus != null)
         {
-            var updated = existing with 
-            { 
-                Status = status, 
-                UpdatedAt = DateTime.UtcNow,
-                ErrorMessage = error
-            };
-            _store.TryUpdate(correlationId, updated, existing);
+            // Запись уже существует
+            return;
+        }
+
+        // Создаём сущность статуса
+        var statusEntity = new NotificationStatusEntity
+        {
+            CorrelationId = correlationId,
+            Status = NotificationStatus.Queued,
+            CreatedAt = request.RequestedAt,
+            UpdatedAt = request.RequestedAt
+        };
+
+        // Создаём сообщение для Outbox
+        var outboxMessage = new OutboxMessage
+        {
+            MessageType = typeof(EmailRequested).AssemblyQualifiedName!,
+            Payload = JsonSerializer.Serialize(request),
+            OccurredOn = DateTime.UtcNow
+        };
+
+        dbContext.NotificationStatuses.Add(statusEntity);
+        dbContext.OutboxMessages.Add(outboxMessage);
+
+        try
+        {
+            // Атомарное сохранение
+            await dbContext.SaveChangesAsync(cancellationToken);
+        }
+        // Fallback — обработка race condition
+        catch (DbUpdateException ex) when (IsUniqueConstraintViolation(ex))
+        {
+            // Между проверкой и вставкой пришёл дубликат (идемпотентность)
+            // Детализируем сущности, чтобы избежать проблем с DbContext
+            dbContext.Entry(statusEntity).State = EntityState.Detached;
+            dbContext.Entry(outboxMessage).State = EntityState.Detached;
         }
     }
 
-    public NotificationStatusResponse? GetStatus(Guid correlationId)
+    /// <summary>
+    /// Проверяет, является ли исключение нарушением уникального ограничения PostgreSQL.
+    /// Код 23505 (unique_violation) означает, что запись с таким ключом уже существует.
+    /// </summary>
+    private static bool IsUniqueConstraintViolation(DbUpdateException ex)
     {
-        _store.TryGetValue(correlationId, out var status);
-        return status;
+        return ex.InnerException is Npgsql.PostgresException pgEx
+               && pgEx.SqlState == "23505";
+    }
+
+    public async Task UpdateStatusAsync(Guid correlationId, NotificationStatus status,
+        CancellationToken cancellationToken, string? errorMessage = null)
+    {
+        var entity = await dbContext.NotificationStatuses
+            .FirstOrDefaultAsync(e => e.CorrelationId == correlationId, cancellationToken: cancellationToken);
+
+        if (entity != null)
+        {
+            entity.Status = status;
+            entity.UpdatedAt = DateTime.UtcNow;
+            entity.ErrorMessage = errorMessage;
+            await dbContext.SaveChangesAsync(cancellationToken);
+        }
+    }
+
+    public async Task<NotificationStatusResponse?> GetStatusAsync(Guid correlationId,
+        CancellationToken cancellationToken)
+    {
+        var entity = await dbContext.NotificationStatuses
+            .AsNoTracking()
+            .FirstOrDefaultAsync(e => e.CorrelationId == correlationId, cancellationToken: cancellationToken);
+
+        if (entity == null)
+        {
+            return null;
+        }
+
+        return new NotificationStatusResponse(
+            CorrelationId: entity.CorrelationId,
+            Status: entity.Status,
+            CreatedAt: entity.CreatedAt,
+            UpdatedAt: entity.UpdatedAt,
+            ErrorMessage: entity.ErrorMessage
+        );
     }
 }

@@ -1,6 +1,11 @@
-﻿namespace Api.Services;
+﻿using MassTransit;
 
-public class RabbitMqMessagePublisher
+namespace Api.Services;
+
+public class RabbitMqMessagePublisher(IPublishEndpoint publishEndpoint) : IMessagePublisher
 {
-    
+    public Task PublishAsync(object message, CancellationToken cancellationToken)
+    {
+        return publishEndpoint.Publish(message, message.GetType(), cancellationToken);
+    }
 }

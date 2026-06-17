@@ -1,4 +1,4 @@
-﻿namespace Api.Options;
+﻿namespace EmailService.Options;
 
 public class MessageBrokerOptions
 {

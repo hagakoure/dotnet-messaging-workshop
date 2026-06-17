@@ -1,34 +1,39 @@
 ﻿using FluentValidation;
-using MassTransit;
 
 namespace Api.Filters;
 
-public class ValidationFilter<T>(IEnumerable<IValidator<T>> validators) : IFilter<ConsumeContext<T>>
-    where T : class
+public class FluentValidationEndpointFilter<T> : IEndpointFilter where T : class
 {
-    public async Task Send(ConsumeContext<T> context, IPipe<ConsumeContext<T>> next)
+    public async ValueTask<object?> InvokeAsync(
+        EndpointFilterInvocationContext context, 
+        EndpointFilterDelegate next)
     {
-        var validationContext = new ValidationContext<T>(context.Message);
-        
-        var validationResults = await Task.WhenAll(
-            validators.Select(v => v.ValidateAsync(validationContext)));
-
-        var failures = validationResults
-            .SelectMany(r => r.Errors)
-            .Where(f => f != null)
-            .ToList();
-
-        if (failures.Any())
+        var argument = context.Arguments.OfType<T>().FirstOrDefault();
+        if (argument is null)
         {
-            var errors = string.Join("; ", failures.Select(f => f.ErrorMessage));
-            throw new ValidationException($"Validation failed: {errors}");
+            return await next(context);
         }
 
-        await next.Send(context);
-    }
+        var validator = context.HttpContext.RequestServices
+            .GetService<IValidator<T>>();
+        
+        if (validator is null)
+        {
+            return await next(context);
+        }
 
-    public void Probe(ProbeContext context)
-    {
-        context.CreateFilterScope("validation");
+        var validationResult = await validator.ValidateAsync(argument);
+        if (!validationResult.IsValid)
+        {
+            var errors = validationResult.Errors
+                .GroupBy(e => e.PropertyName)
+                .ToDictionary(
+                    g => g.Key,
+                    g => g.Select(e => e.ErrorMessage).ToArray());
+            
+            return Results.ValidationProblem(errors);
+        }
+
+        return await next(context);
     }
 }
