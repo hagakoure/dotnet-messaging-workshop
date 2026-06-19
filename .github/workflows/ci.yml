@@ -37,10 +37,10 @@ jobs:
         run: dotnet test --no-build --configuration Release --verbosity normal
 
       - name: Publish API
-        run: dotnet publish Api/Api.csproj --configuration Release --output ./publish/api
+        run: dotnet publish Api/Api.csproj --configuration Release --output ./publish/api --no-dependencies
 
       - name: Publish EmailService
-        run: dotnet publish EmailService/EmailService.csproj --configuration Release --output ./publish/emailservice
+        run: dotnet publish EmailService/EmailService.csproj --configuration Release --output ./publish/emailservice --no-dependencies
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
@@ -48,45 +48,3 @@ jobs:
           name: published-apps
           path: ./publish/
           retention-days: 7
-
-  docker-build:
-    needs: build-and-test
-    runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/main'
-    
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Login to Docker Hub
-        uses: docker/login-action@v3
-        with:
-          username: ${{ secrets.DOCKER_USERNAME }}
-          password: ${{ secrets.DOCKER_PASSWORD }}
-
-      - name: Build and push API image
-        uses: docker/build-push-action@v5
-        with:
-          context: .
-          file: ./Api/Dockerfile
-          push: true
-          tags: |
-            ${{ secrets.DOCKER_USERNAME }}/notification-api:latest
-            ${{ secrets.DOCKER_USERNAME }}/notification-api:${{ github.sha }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-
-      - name: Build and push EmailService image
-        uses: docker/build-push-action@v5
-        with:
-          context: .
-          file: ./EmailService/Dockerfile
-          push: true
-          tags: |
-            ${{ secrets.DOCKER_USERNAME }}/notification-consumer:latest
-            ${{ secrets.DOCKER_USERNAME }}/notification-consumer:${{ github.sha }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
