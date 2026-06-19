@@ -7,4 +7,6 @@ public class OutboxMessage
     public string Payload { get; set; } = null!; // JSON
     public DateTime OccurredOn { get; set; } = DateTime.UtcNow;
     public DateTime? ProcessedAt { get; set; }
+    public int RetryCount { get; set; }
+    public DateTime? DeadLetteredAt { get; set; }
 }

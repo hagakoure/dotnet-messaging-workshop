@@ -1,14 +1,12 @@
 ﻿using System.Text.Json;
 using Api.Data;
 using Microsoft.EntityFrameworkCore;
-using Shared.Contracts;
 
 namespace Api.Services;
 
 public class OutboxService(
     IServiceScopeFactory scopeFactory,
-    ILogger<OutboxService> logger,
-    IHostApplicationLifetime lifetime)
+    ILogger<OutboxService> logger)
     : BackgroundService
 {
     private readonly TimeSpan _pollingInterval = TimeSpan.FromSeconds(2);
@@ -18,7 +16,7 @@ public class OutboxService(
         while (!stoppingToken.IsCancellationRequested)
         {
             logger.LogDebug("OutboxService: Starting iteration...");
-        
+
             try
             {
                 await ProcessOutboxMessagesAsync(stoppingToken);
@@ -34,7 +32,7 @@ public class OutboxService(
             }
 
             logger.LogDebug("OutboxService: Iteration completed. Waiting {Interval}...", _pollingInterval);
-        
+
             try
             {
                 await Task.Delay(_pollingInterval, stoppingToken);
@@ -56,11 +54,11 @@ public class OutboxService(
         var publisher = scope.ServiceProvider.GetRequiredService<IMessagePublisher>();
 
         var messages = await dbContext.OutboxMessages
-            .Where(m => m.ProcessedAt == null)
+            .Where(m => m.ProcessedAt == null && m.DeadLetteredAt == null)
             .OrderBy(m => m.OccurredOn)
             .Take(10)
             .ToListAsync(stoppingToken);
-        
+
         if (messages.Count == 0) return;
 
         foreach (var message in messages)
@@ -76,7 +74,7 @@ public class OutboxService(
                     continue;
                 }
 
-                var @event = System.Text.Json.JsonSerializer.Deserialize(message.Payload, messageType);
+                var @event = JsonSerializer.Deserialize(message.Payload, messageType);
                 if (@event == null)
                 {
                     continue;
@@ -93,6 +91,15 @@ public class OutboxService(
             catch (Exception ex)
             {
                 logger.LogError(ex, "Error when publishing {MessageId}", message.Id);
+
+                message.RetryCount++;
+
+                if (message.RetryCount >= 3)
+                {
+                    message.DeadLetteredAt = DateTime.UtcNow;
+                    logger.LogError("Message {Id} moved to DLQ after {RetryCount} retries",
+                        message.Id, message.RetryCount);
+                }
             }
         }
 

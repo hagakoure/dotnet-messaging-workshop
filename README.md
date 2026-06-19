@@ -116,7 +116,7 @@ dotnet-messaging-workshop/
 │   └── Data/                     # Idempotency tracking
 ├── Shared/                       # Общие контракты (DTO, events)
 ├── UnitTests/                    # Unit-тесты
-├── docker-compose.yml            # Инфраструктура
+├── compose.yml                   # Инфраструктура
 ├── Directory.Packages.props      # Central Package Management
 └── README.md
 ```

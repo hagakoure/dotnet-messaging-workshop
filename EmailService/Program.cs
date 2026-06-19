@@ -59,6 +59,12 @@ builder.Services.AddMassTransit(configurator =>
                         e.ConfigureConsumer<EmailConsumer>(context);
                         e.AutoOffsetReset = AutoOffsetReset.Earliest;
                         e.CheckpointInterval = TimeSpan.FromSeconds(5);
+
+                        e.UseMessageRetry(r => r.Exponential(
+                            3, // retryCount
+                            TimeSpan.FromSeconds(2), // minInterval
+                            TimeSpan.FromSeconds(30), // maxInterval
+                            TimeSpan.FromSeconds(2))); // intervalDelta
                     });
             });
         });
@@ -79,19 +85,16 @@ builder.Services.AddMassTransit(configurator =>
                 h.Password(rabbitOptions.Password);
             });
 
-            cfg.UseMessageRetry(r => r.Exponential(
-                3, // retryLimit (не retryCount!)
-                TimeSpan.FromSeconds(2), // minInterval
-                TimeSpan.FromSeconds(30), // maxInterval
-                TimeSpan.FromSeconds(2))); // intervalDelta
-
-            cfg.ReceiveEndpoint("email-queue", e =>
+            cfg.ReceiveEndpoint("email-queue", (MassTransit.IReceiveEndpointConfigurator e) =>
             {
                 e.ConfigureConsumer<EmailConsumer>(context);
                 e.PrefetchCount = 10;
 
-                // MassTransit автоматически создаёт error queue: email-queue_error
-                // и перемещает туда сообщения после исчерпания retry
+                e.UseMessageRetry(r => r.Exponential(
+                    3, // retryCount
+                    TimeSpan.FromSeconds(2), // minInterval
+                    TimeSpan.FromSeconds(30), // maxInterval
+                    TimeSpan.FromSeconds(2))); // intervalDelta
             });
         });
     }
