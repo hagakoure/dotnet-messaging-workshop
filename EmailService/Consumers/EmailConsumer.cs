@@ -31,9 +31,6 @@ public class EmailConsumer(ILogger<EmailConsumer> logger, EmailDbContext dbConte
             //Имитация бизнес-логики (отправка письма)
             await Task.Delay(500, context.CancellationToken);
 
-            logger.LogInformation("Email sent successfully to {To} [CorrelationId: {CorrelationId}]",
-                message.To, message.CorrelationId);
-
             // Пытаемся сохранить факт обработки
             var processedEvent = new ProcessedEvent
             {
@@ -44,8 +41,6 @@ public class EmailConsumer(ILogger<EmailConsumer> logger, EmailDbContext dbConte
 
             await dbContext.ProcessedEvents.AddAsync(processedEvent, context.CancellationToken);
             await dbContext.SaveChangesAsync(context.CancellationToken);
-
-            logger.LogInformation("ProcessedEvent saved for EventId: {EventId}", uniqueEventId);
         }
         // Fallback — обработка race condition
         // Если между AnyAsync и SaveChangesAsync пришёл дубликат — обрабатываем как успех

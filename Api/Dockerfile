@@ -2,7 +2,6 @@
 FROM mcr.microsoft.com/dotnet/sdk:8.0 AS build
 WORKDIR /src
 
-# 🔥 КРИТИЧНО: Копируем Directory.Packages.props ПЕРВЫМ
 COPY ["Directory.Packages.props", "./"]
 
 # Копируем файлы проектов

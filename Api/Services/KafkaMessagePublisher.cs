@@ -13,15 +13,8 @@ public class KafkaMessagePublisher(
     {
         if (message is EmailRequested emailEvent)
         {
-            logger.LogInformation(
-                "KafkaMessagePublisher: Publishing EmailRequested to topic 'email-events'. CorrelationId: {CorrelationId}", 
-                emailEvent.CorrelationId);
-            
             await producer.Produce(emailEvent, cancellationToken);
             
-            logger.LogInformation(
-                "KafkaMessagePublisher: Successfully published to Kafka. CorrelationId: {CorrelationId}", 
-                emailEvent.CorrelationId);
             return;
         }
         
