@@ -1,4 +1,3 @@
-using Api.Filters;
 using Confluent.Kafka;
 using EmailService.Consumers;
 using EmailService.Data;
